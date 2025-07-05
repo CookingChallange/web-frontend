@@ -1,0 +1,62 @@
+name: Deploy to Remote Server on Release
+
+on:
+  release:
+    types:
+      - published  # This will trigger the action when a release is published
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Checkout the repository
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      # Set up Docker to use GitHub Container Registry or Docker Hub
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v1
+
+      # Log in to Docker Hub or GitHub Container Registry (GCR)
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}  # Your Docker Hub username (or GitHub Container Registry)
+          password: ${{ secrets.DOCKER_PASSWORD }}  # Your Docker Hub password (or GitHub token)
+
+      # Build the Docker image
+      - name: Build Docker image
+        run: |
+          docker build -t my-app:${{ github.sha }} .
+        
+      # Push the Docker image to Docker Hub or GitHub Container Registry
+      - name: Push Docker image
+        run: |
+          docker tag my-app:${{ github.sha }} my-docker-repo/my-app:${{ github.sha }}
+          docker push my-docker-repo/my-app:${{ github.sha }}
+
+      # Set up SSH keys to connect to remote server
+      - name: Set up SSH keys
+        uses: webfactory/ssh-agent@v0.5.3
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}  # The private key stored in GitHub Secrets
+
+      # SSH into the remote server and deploy
+      - name: SSH into the remote server and deploy
+        run: |
+          ssh -o StrictHostKeyChecking=no \
+            -i ~/.ssh/id_rsa \
+            ${{ secrets.SSH_USER }}@${{ secrets.REMOTE_SERVER_IP }} << 'EOF'
+            # Set up environment variables (commit hash and build ID)
+            export COMMIT_HASH="${GITHUB_SHA}"
+            export BUILD_ID="${GITHUB_RUN_ID}"
+            
+            # Pull the latest image from the registry
+            docker pull my-docker-repo/my-app:${COMMIT_HASH}
+
+            # Run the deployment script (pass commit hash and build ID)
+            cd /path/to/deployment/scripts
+            ./deploy.sh $COMMIT_HASH $BUILD_ID
+          EOF
+
